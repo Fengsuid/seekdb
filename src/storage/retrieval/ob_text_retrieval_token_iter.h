@@ -145,6 +145,8 @@ public:
 private:
   int save_relevances_and_docids();
   int save_docids();
+  int compare_doc_id(const ObDatum &lhs, const ObDatum &rhs, int &cmp_ret) const;
+  int advance_in_buffer(const ObDatum &id_datum, bool &found);
   ObArenaAllocator *allocator_;
   ObTextRetrievalTokenIter *token_iter_;
   sql::ObEvalCtx *eval_ctx_;
@@ -156,6 +158,8 @@ private:
   ObFixedArray<double, ObIAllocator> relevance_; // when ~ObFixedArray(), wikll destory itself
   ObFixedArray<ObDocIdExt, ObIAllocator> doc_id_;
   common::ObDatumCmpFuncType cmp_func_;
+  // whether the doc id is the fixed length binary doc id, see ObFixedLenBinaryDocId
+  bool is_fixed_binary_doc_id_;
   bool is_inited_;
   DISALLOW_COPY_AND_ASSIGN(ObTextRetrievalDaaTTokenIter);
 };
