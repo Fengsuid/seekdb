@@ -82,7 +82,13 @@ public:
 
 private:
   static const int64_t DEFAULT_STOPWORD_BUCKET_NUM = 37L;
-  typedef common::hash::ObHashSet<storage::ObFTWord> StopWordSet;
+  // The stopword set is filled only in init() and never modified afterwards, and
+  // init() finishes before the server starts serving sql requests, so lookups can
+  // read the buckets without taking the per bucket latch.
+  typedef common::hash::ObHashSet<storage::ObFTWord, common::hash::NoPthreadDefendMode> StopWordSet;
+
+  // look up a word that has already been converted to stopword_type_.
+  int do_check_stopword(const common::ObString &word_str, bool &is_stopword);
 
   StopWordSet stopword_set_;
   ObObjMeta stopword_type_;
