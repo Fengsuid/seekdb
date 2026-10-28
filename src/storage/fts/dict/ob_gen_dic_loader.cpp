@@ -118,12 +118,28 @@ int ObGenDicLoader::get_dic_loader(const ObString &parser_name,
   int ret = OB_SUCCESS;
   ObGenDicLoaderKey dic_loader_key;
   ObDicLoader *dic_loader = nullptr;
+  bool found = false;
   if (!is_inited_) {
     ret = OB_NOT_INIT;
   } else if (parser_name.empty()
              || charset == CHARSET_INVALID) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(dic_loader_key.init(parser_name, charset))) {
+  } else {
+    // Fast path: loaders are only ever added to the map, so a hit under the read lock is
+    // final. TCRWLock::wrlock has to sync every reader slot, which is costly per call.
+    TCRLockGuard guard(lock_);
+    if (OB_FAIL(dic_loader_map_.get_refactored(dic_loader_key, dic_loader))) {
+      if (OB_HASH_NOT_EXIST == ret) {
+        ret = OB_SUCCESS;
+        dic_loader = nullptr;
+      }
+    } else if (OB_FAIL(loader_handle.set_loader(dic_loader))) {
+    } else {
+      found = true;
+    }
+  }
+  if (OB_FAIL(ret) || found) {
   } else {
     TCWLockGuard guard(lock_);
     if (OB_FAIL(dic_loader_map_.get_refactored(dic_loader_key, dic_loader))) {

@@ -377,7 +377,11 @@ int ObFTParseHelper::segment(
   } else if (OB_ISNULL(cs = common::ObCharset::get_charset(type))) {
     ret = OB_ERR_UNEXPECTED;
   } else {
-    words.reuse();
+    if (words.size() > 0) {
+      // Callers usually pass a freshly created map; clearing an empty map still takes
+      // every bucket lock, so skip it.
+      words.reuse();
+    }
     ObAddWord add_word(parser_property_, meta, add_word_flag_, *allocator_, words);
     if (OB_FAIL(segment(
                     parser_property_,

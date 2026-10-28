@@ -382,17 +382,43 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
 {
   int ret = OB_SUCCESS;
   bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
+  if (ranges_sorted_) {
+    // Disjoint ascending ranges: only the last range whose start <= word can contain it,
+    // which is the same range the linear scan below would find first.
+    int64_t lo = 0;
+    int64_t hi = range_dicts_.size();
+    while (lo < hi) {
+      const int64_t mid = lo + (hi - lo) / 2;
+      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                            range_dicts_[mid].start_.get_word(),
+                            single_word)
+          <= 0) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    if (lo > 0
         && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
+                             range_dicts_[lo - 1].end_.get_word(),
                              single_word)
                >= 0) {
-      dict = range_dicts_[i].dict_;
+      dict = range_dicts_[lo - 1].dict_;
       found = true;
+    }
+  } else {
+    for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
+      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                            range_dicts_[i].start_.get_word(),
+                            single_word)
+              <= 0
+          && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                               range_dicts_[i].end_.get_word(),
+                               single_word)
+                 >= 0) {
+        dict = range_dicts_[i].dict_;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -400,6 +426,26 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
     ret = OB_ENTRY_NOT_EXIST;
   }
   return ret;
+}
+
+bool ObFTRangeDict::check_ranges_sorted() const
+{
+  bool sorted = true;
+  for (int64_t i = 0; sorted && i < range_dicts_.size(); ++i) {
+    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                          range_dicts_[i].start_.get_word(),
+                          range_dicts_[i].end_.get_word())
+        > 0) {
+      sorted = false;
+    } else if (i + 1 < range_dicts_.size()
+               && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                                    range_dicts_[i].end_.get_word(),
+                                    range_dicts_[i + 1].start_.get_word())
+                      >= 0) {
+      sorted = false;
+    }
+  }
+  return sorted;
 }
 
 int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_container)
@@ -421,6 +467,9 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }
     }
+  }
+  if (OB_SUCC(ret)) {
+    ranges_sorted_ = check_ranges_sorted();
   }
   return ret;
 }
