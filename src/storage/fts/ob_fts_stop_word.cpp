@@ -215,23 +215,35 @@ int ObAddWord::check_stopword(const ObFTWord &ft_word, bool &is_stopword)
   return ret;
 }
 
+namespace
+{
+// set_or_update() callback of ObAddWord::groupby_word(): adds the frequency of a word that is
+// already in the word map.
+struct AddWordFreq
+{
+  explicit AddWordFreq(const int64_t word_freq) : word_freq_(word_freq) {}
+  void operator()(common::hash::HashMapPair<ObFTWord, int64_t> &entry)
+  {
+    entry.second += word_freq_;
+  }
+  const int64_t word_freq_;
+};
+} // namespace
+
 int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
 {
   int ret = OB_SUCCESS;
-  int64_t word_count = 0;
   if (OB_UNLIKELY(word.empty() || word_freq <= 0)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (!flag_.groupby_word()) {
     if (OB_FAIL(word_map_.set_refactored(word, 1/*word count*/))) {
     }
-  } else if (OB_FAIL(word_map_.get_refactored(word, word_count)) && OB_HASH_NOT_EXIST != ret) {
   } else {
-    if (OB_HASH_NOT_EXIST == ret) {
-      word_count = 1;
-    } else {
-      word_count += word_freq;
-    }
-    if (OB_FAIL(word_map_.set_refactored(word, word_count, 1/*overwrite*/))) {
+    // One bucket pass: a new word is inserted with count 1, an existing word gets word_freq
+    // added in place. Updating in place keeps the node at its position in the bucket chain,
+    // like the former overwrite did, so the iteration order of the map is unchanged.
+    AddWordFreq add_word_freq(word_freq);
+    if (OB_FAIL(word_map_.set_or_update(word, 1/*word count*/, add_word_freq))) {
     }
   }
   return ret;

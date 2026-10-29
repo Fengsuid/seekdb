@@ -378,6 +378,21 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+// Same sign as ObCharset::strcmp(CS_TYPE_UTF8MB4_BIN, l, r): the binary collation compares
+// the common prefix with memcmp and then the lengths (an empty string sorts first). The range
+// lookup runs for every character during segmentation, so skip the generic charset dispatch.
+static OB_INLINE int compare_utf8mb4_bin(const ObString &l, const ObString &r)
+{
+  const int64_t l_len = l.length();
+  const int64_t r_len = r.length();
+  const int64_t min_len = l_len < r_len ? l_len : r_len;
+  int cmp = min_len > 0 ? MEMCMP(l.ptr(), r.ptr(), min_len) : 0;
+  if (0 == cmp) {
+    cmp = (l_len > r_len) - (l_len < r_len);
+  }
+  return cmp;
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
@@ -389,8 +404,7 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
     int64_t hi = range_dicts_.size();
     while (lo < hi) {
       const int64_t mid = lo + (hi - lo) / 2;
-      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                            range_dicts_[mid].start_.get_word(),
+      if (compare_utf8mb4_bin(range_dicts_[mid].start_.get_word(),
                             single_word)
           <= 0) {
         lo = mid + 1;
@@ -399,8 +413,7 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
       }
     }
     if (lo > 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[lo - 1].end_.get_word(),
+        && compare_utf8mb4_bin(range_dicts_[lo - 1].end_.get_word(),
                              single_word)
                >= 0) {
       dict = range_dicts_[lo - 1].dict_;
@@ -408,12 +421,10 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
     }
   } else {
     for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                            range_dicts_[i].start_.get_word(),
+      if (compare_utf8mb4_bin(range_dicts_[i].start_.get_word(),
                             single_word)
               <= 0
-          && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                               range_dicts_[i].end_.get_word(),
+          && compare_utf8mb4_bin(range_dicts_[i].end_.get_word(),
                                single_word)
                  >= 0) {
         dict = range_dicts_[i].dict_;
@@ -432,14 +443,12 @@ bool ObFTRangeDict::check_ranges_sorted() const
 {
   bool sorted = true;
   for (int64_t i = 0; sorted && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
+    if (compare_utf8mb4_bin(range_dicts_[i].start_.get_word(),
                           range_dicts_[i].end_.get_word())
         > 0) {
       sorted = false;
     } else if (i + 1 < range_dicts_.size()
-               && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                                    range_dicts_[i].end_.get_word(),
+               && compare_utf8mb4_bin(range_dicts_[i].end_.get_word(),
                                     range_dicts_[i + 1].start_.get_word())
                       >= 0) {
       sorted = false;
