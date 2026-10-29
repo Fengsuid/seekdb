@@ -3277,16 +3277,26 @@ int ObIJsonBase::print_array(ObJsonBuffer &j_buf, uint64_t depth, bool is_pretty
 
   if (OB_FAIL(j_buf.append("["))) {
   } else {
+    // Plain string elements of a binary array are printed straight from the bin layout,
+    // which avoids building and initializing an ObJsonBin per element. The text of such an
+    // element is produced by the very same escaping helper as the generic path below, so
+    // the output is unchanged. Everything else keeps using the generic element path.
+    const bool try_string_element = is_bin() && ObJsonNodeType::J_ARRAY == json_type();
     uint64_t arr_size = element_count();
     for (uint64_t i = 0; OB_SUCC(ret) && i < arr_size; ++i) {
       if (i > 0 && OB_FAIL(ObJsonBaseUtil::append_comma(j_buf, is_pretty))) {
       } else if (is_pretty && OB_FAIL(ObJsonBaseUtil::append_newline_and_indent(j_buf, depth))) {
       } else {
-        ObIJsonBase *jb_ptr = NULL;
-        ObJsonBin j_bin(allocator_);
-        jb_ptr = &j_bin;
-        if (OB_FAIL(get_array_element(i, jb_ptr))) {
-        } else if (OB_FAIL(jb_ptr->print(j_buf, true, 0, is_pretty, depth))) {
+        bool printed = false;
+        if (try_string_element
+            && OB_FAIL(static_cast<const ObJsonBin *>(this)->try_print_string_element(i, j_buf, printed))) {
+        } else if (!printed) {
+          ObIJsonBase *jb_ptr = NULL;
+          ObJsonBin j_bin(allocator_);
+          jb_ptr = &j_bin;
+          if (OB_FAIL(get_array_element(i, jb_ptr))) {
+          } else if (OB_FAIL(jb_ptr->print(j_buf, true, 0, is_pretty, depth))) {
+          }
         }
       }
     }
@@ -3317,6 +3327,9 @@ int ObIJsonBase::print_object(ObJsonBuffer &j_buf, uint64_t depth, bool is_prett
 
   if (OB_FAIL(j_buf.append("{"))) {
   } else {
+    // Same as print_array: plain string values are printed from the bin layout directly,
+    // all other values keep using the generic element path.
+    const bool try_string_element = is_bin() && ObJsonNodeType::J_OBJECT == json_type();
     bool is_first = true;
     uint64_t count = element_count();
     for (uint64_t i = 0; OB_SUCC(ret) && i < count; i++) {
@@ -3331,11 +3344,16 @@ int ObIJsonBase::print_object(ObJsonBuffer &j_buf, uint64_t depth, bool is_prett
         } else if (OB_FAIL(pint_colon(j_buf, is_pretty))) {
         } else if (OB_FAIL(j_buf.append(" "))) {
         } else {
-          ObIJsonBase *jb_ptr = NULL;
-          ObJsonBin j_bin(allocator_);
-          jb_ptr = &j_bin;
-          if (OB_FAIL(get_object_value(i, jb_ptr))) {
-          } else if (OB_FAIL(jb_ptr->print(j_buf, true, 0, is_pretty, depth))) {
+          bool printed = false;
+          if (try_string_element
+              && OB_FAIL(static_cast<const ObJsonBin *>(this)->try_print_string_element(i, j_buf, printed))) {
+          } else if (!printed) {
+            ObIJsonBase *jb_ptr = NULL;
+            ObJsonBin j_bin(allocator_);
+            jb_ptr = &j_bin;
+            if (OB_FAIL(get_object_value(i, jb_ptr))) {
+            } else if (OB_FAIL(jb_ptr->print(j_buf, true, 0, is_pretty, depth))) {
+            }
           }
         }
       }

@@ -601,6 +601,12 @@ public:
   int get_object_value(const ObString &key, ObIJsonBase *&value) const override;
   int get_object_value(uint64_t index, ObString &key, ObIJsonBase *&value) const override;
   int get_key(uint64_t index, common::ObString &key_out) const override;
+  // Print the value at the given index of this bin array/object when it is a plain (non
+  // inline, non extended) string. The text is appended by the same ObJsonBaseUtil functions
+  // used by ObIJsonBase::print(), so the escaping is unchanged. When the value is not such a
+  // string nothing is appended, printed is set to false and the caller falls back to the
+  // generic element access.
+  int try_print_string_element(uint64_t index, ObJsonBuffer &j_buf, bool &printed) const;
   int raw_binary(common::ObString &out, ObIAllocator *allocator) const;
   int get_raw_binary(common::ObString &out, ObIAllocator *allocator) const;
   int get_raw_binary_v0(common::ObString &out, ObIAllocator *allocator) const;

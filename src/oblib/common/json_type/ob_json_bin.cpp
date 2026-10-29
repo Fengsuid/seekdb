@@ -392,6 +392,46 @@ int ObJsonBin::get_object_value(const ObString &key, ObIJsonBase *&value) const
   return ret;
 }
 
+int ObJsonBin::try_print_string_element(uint64_t index, ObJsonBuffer &j_buf, bool &printed) const
+{
+  INIT_SUCC(ret);
+  uint64_t value_offset = 0;
+  uint8_t value_type = 0;
+  printed = false;
+  if (OB_UNLIKELY(index >= get_element_count())) {
+    ret = OB_OUT_OF_ELEMENT;
+  } else if (OB_UNLIKELY((ObJsonNodeType::J_ARRAY != json_type()
+                          && ObJsonNodeType::J_OBJECT != json_type()))) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(get_value_entry(index, value_offset, value_type))) {
+  } else if (ObJBVerType::J_STRING_V0 != value_type) {
+    // Inline scalars, extended (forward) values, nested objects/arrays and all non string
+    // types keep using the generic element path.
+  } else {
+    // Same layout as ObJsonBin::init_string_node_v0: [vertype][vi64 length][data].
+    int64_t str_len = 0;
+    int64_t data_offset = pos_ + value_offset + sizeof(uint8_t);
+    ObString str;
+    if (OB_FAIL(cursor_->decode_vi64(data_offset, &str_len))) {
+    } else if (OB_UNLIKELY(str_len < 0)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (0 == str_len) {
+      // ObIJsonBase::print() prints an empty string element as "" without reading data.
+      if (OB_FAIL(j_buf.append("\"\"", 2, 0))) {
+      } else {
+        printed = true;
+      }
+    } else if (OB_FAIL(cursor_->get(data_offset, str_len, str))) {
+    } else if (OB_ISNULL(str.ptr())) {
+      ret = OB_ERR_NULL_VALUE;
+    } else if (OB_FAIL(ObJsonBaseUtil::append_string(j_buf, true, str.ptr(), str_len))) {
+    } else {
+      printed = true;
+    }
+  }
+  return ret;
+}
+
 int ObJsonBinSerializer::serialize_json_object(ObJsonNode *object, ObJsonBuffer &result, const bool enable_reserialize, uint32_t depth)
 {
   INIT_SUCC(ret);
