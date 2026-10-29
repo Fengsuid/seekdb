@@ -1,0 +1,100 @@
+# owner: database-competition
+# owner group: SQL
+# description: Regression coverage for the fulltext performance work: tokenize word order and
+#              counts, MATCH results and scores, COUNT over a LIMIT derived table, index lookups
+#              with a small LIMIT, parallel index builds and JSON printing of tokenize results.
+
+--disable_warnings
+drop table if exists fts_perf_t1, fts_perf_t2;
+--enable_warnings
+
+--echo # tokenize keeps its word order and word counts
+select tokenize('数据库 数据库 全文索引 数据库 全文索引 分词', 'ik', '[{"output":"all"}]');
+select tokenize('OceanBase是一款非常稳定的数据库，全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例', 'ik');
+select tokenize('the quick quick quick brown fox fox jumps over the lazy dog', 'beng', '[{"output":"all"}]');
+select tokenize('The THE tHe about Hello   world  ', 'beng');
+select tokenize('hello hello world the hello WORLD', 'space', '[{"output":"all"}]');
+select tokenize('一二三四五 六七八 拾佰仟 卅廿 3个 两件 1.2亿 110个', 'ik');
+select tokenize('say "hi" \\ back/slash 中文', 'space');
+select tokenize('', 'ik');
+
+--echo # JSON printing of arrays and objects
+select json_array('a', '', '中文', 'q"uote', 1, 2.5, true, null, json_array('x', json_object('k', 'v')));
+select json_object('s', 'str', 'e', '', 'n', 1, 'a', json_array('p', 'q'));
+select json_pretty(json_array('a', json_object('k', 'v'), 1, null));
+
+create table fts_perf_t1 (
+  id bigint primary key,
+  title varchar(200),
+  content text,
+  title_en varchar(200),
+  content_en text,
+  key idx_title_en (title_en)
+);
+insert into fts_perf_t1 values
+  (1, '全文索引', '倒排索引 分词器 数据库', 'fulltext index', 'inverted index tokenizer database'),
+  (2, '数据库', 'OceanBase 稳定 数据库 性能', 'database', 'stable database performance'),
+  (3, '分词器', '全文索引 分词器 热路径', 'tokenizer', 'tokenizer hot path'),
+  (4, '查询', '倒排索引 查询 合并', 'query', 'inverted index query merge'),
+  (5, '构建', '索引 构建 排序 并行', 'build', 'index build sort parallel'),
+  (6, '稳定', 'OceanBase 稳定 database', 'stable', 'oceanbase stable database'),
+  (7, '审计', 'database performance audit 审计', 'audit', 'database performance audit'),
+  (8, '空', '无关 内容', 'none', 'nothing related'),
+  (9, '倒排', '倒排 索引 tokenizer', 'inverted', 'inverted tokenizer'),
+  (10, '全文', '全文索引 全文索引 分词器 分词器', 'fulltext', 'fulltext fulltext tokenizer');
+insert into fts_perf_t1 select id + 10, title, content, title_en, content_en from fts_perf_t1;
+insert into fts_perf_t1 select id + 20, title, content, title_en, content_en from fts_perf_t1;
+
+--echo # indexes built without any parallel setting (default degree)
+alter table fts_perf_t1 add fulltext index ft_all(title, content) with parser ik;
+alter table fts_perf_t1 add fulltext index ft_en(title_en, content_en) with parser beng;
+
+--echo # MATCH results, scores and filters
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器');
+select count(*) from fts_perf_t1 where match(title_en, content_en) against('database performance audit');
+select count(*) from fts_perf_t1 where match(title, content) against('OceanBase 稳定 database');
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器') > 0;
+select count(*) from fts_perf_t1 where match(title, content) against('+全文索引 +分词器' in boolean mode);
+select sum(id), min(id), max(id) from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer');
+select id from fts_perf_t1 where match(title, content) against('全文索引 分词器')
+  order by match(title, content) against('全文索引 分词器') desc, id limit 8;
+select id from fts_perf_t1 where match(title_en, content_en) against('database performance audit')
+  order by match(title_en, content_en) against('database performance audit') desc, id limit 8;
+
+--echo # COUNT over a LIMIT derived table, and views whose columns are read
+select count(*) from (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5) t;
+select count(*) from (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 1000) t;
+select count(*) from (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5 offset 2) t;
+select count(*) from ((select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 3) t1,
+                      (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 4) t2);
+select t.id from (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5) t order by t.id;
+select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5;
+select count(*), sum(id) from fts_perf_t1 where id in (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5);
+select count(*) from (select id from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer') limit 5) t
+  where exists (select 1 from fts_perf_t1 x where x.id = t.id);
+
+--echo # index lookups with a small LIMIT
+select id, title_en from fts_perf_t1 where title_en > 'b' order by title_en, id limit 3;
+select id, title_en from fts_perf_t1 force index(idx_title_en) where title_en >= 'fulltext' limit 2;
+select id from fts_perf_t1 where match(title, content) against('倒排索引') order by id limit 3;
+
+--echo # explicit parallel builds give the same results as the default build
+alter table fts_perf_t1 drop index ft_all;
+alter /*+ parallel(12) */ table fts_perf_t1 add fulltext index ft_all(title, content) with parser ik;
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器');
+select sum(id), min(id), max(id) from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer');
+select id from fts_perf_t1 where match(title, content) against('全文索引 分词器')
+  order by match(title, content) against('全文索引 分词器') desc, id limit 8;
+alter table fts_perf_t1 drop index ft_all;
+alter /*+ parallel(1) */ table fts_perf_t1 add fulltext index ft_all(title, content) with parser ik;
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器');
+select sum(id), min(id), max(id) from fts_perf_t1 where match(title, content) against('倒排索引 tokenizer');
+
+--echo # rows inserted after the index build are visible to MATCH
+insert into fts_perf_t1 values (100, '新增', '全文索引 分词器 新增', 'new', 'new database audit');
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器');
+select count(*) from fts_perf_t1 where match(title_en, content_en) against('database performance audit');
+delete from fts_perf_t1 where id = 100;
+select count(*) from fts_perf_t1 where match(title, content) against('全文索引 分词器');
+
+drop table fts_perf_t1;
